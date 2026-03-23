@@ -1,9 +1,9 @@
 [build]
 builder = "railpack"
-buildCommand = "npm run build && cd comrade && python manage.py collectstatic --noinput"
+buildCommand = "cd client && rm -rf node_modules && npm install && npm run build && cd ../comrade && python manage.py collectstatic --noinput"
 
 [deploy]
-startCommand = "cd comrade && python manage.py migrate --noinput && daphne -b 0.0.0.0 -p $PORT comrade.asgi:application"
+startCommand = ". /app/.venv/bin/activate && cd /app/comrade && python manage.py migrate --noinput && daphne -b 0.0.0.0 -p $PORT comrade.asgi:application"
 healthcheckPath = "/api/auth/google-config/"
 healthcheckTimeout = 120
 restartPolicyType = "on_failure"
