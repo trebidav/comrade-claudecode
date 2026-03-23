@@ -3,7 +3,7 @@ nixPkgs = ["python312", "nodejs_22", "postgresql"]
 
 [phases.install]
 cmds = [
-    "pip install pipenv",
+    "python3 -m pip install pipenv",
     "pipenv sync --system",
     "cd client && npm ci",
 ]
