@@ -4,7 +4,7 @@ nixPkgs = ["python312", "nodejs_22", "postgresql"]
 [phases.install]
 cmds = [
     "python3 -m venv --copies /opt/venv && . /opt/venv/bin/activate && pip install pipenv && PIPENV_VENV_IN_PROJECT=1 pipenv install --deploy",
-    "cd client && npm install",
+    "cd client && rm -f package-lock.json && npm install",
 ]
 
 [phases.build]
