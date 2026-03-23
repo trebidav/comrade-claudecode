@@ -1,16 +1,9 @@
 [phases.setup]
-nixPkgs = ["python312", "nodejs_22", "postgresql"]
-
-[phases.install]
-cmds = [
-    "python3 -m pip install pipenv",
-    "pipenv sync --system",
-    "cd client && npm ci",
-]
+nixPkgs = ["nodejs_22", "postgresql"]
 
 [phases.build]
 cmds = [
-    "cd client && npm run build",
+    "cd client && npm ci && npm run build",
     "cd comrade && python manage.py collectstatic --noinput",
 ]
 
