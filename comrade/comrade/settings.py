@@ -75,9 +75,9 @@ TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
         "DIRS": [
+            str(_REACT_DIST),
             str(BASE_DIR) + "/templates/",
             str(BASE_DIR) + "/comrade_core/templates/",
-            str(_REACT_DIST),
         ],
         "APP_DIRS": True,
         "OPTIONS": {
