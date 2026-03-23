@@ -1,9 +1,15 @@
 [phases.setup]
-nixPkgs = ["nodejs_22", "postgresql"]
+nixPkgs = ["python312", "nodejs_22", "postgresql"]
+
+[phases.install]
+cmds = [
+    "python3 -m venv --copies /opt/venv && . /opt/venv/bin/activate && pip install pipenv && PIPENV_VENV_IN_PROJECT=1 pipenv install --deploy",
+    "cd client && npm ci",
+]
 
 [phases.build]
 cmds = [
-    "cd client && npm ci && npm run build",
+    "cd client && npm run build",
     "cd comrade && python manage.py collectstatic --noinput",
 ]
 
