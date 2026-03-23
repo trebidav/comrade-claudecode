@@ -1,0 +1,18 @@
+[phases.setup]
+nixPkgs = ["python312", "nodejs_22", "postgresql"]
+
+[phases.install]
+cmds = [
+    "pip install pipenv",
+    "pipenv sync --system",
+    "cd client && npm ci",
+]
+
+[phases.build]
+cmds = [
+    "cd client && npm run build",
+    "cd comrade && python manage.py collectstatic --noinput",
+]
+
+[start]
+cmd = "cd comrade && python manage.py migrate --noinput && daphne -b 0.0.0.0 -p $PORT comrade.asgi:application"

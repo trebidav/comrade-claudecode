@@ -88,7 +88,8 @@ export function useLocationSocket({ token, username, userId }: Props) {
   useEffect(() => {
     if (!token) return
 
-    const ws = new WebSocket(`ws://${window.location.host}/ws/location/?token=${token}`)
+    const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
+      const ws = new WebSocket(`${wsScheme}://${window.location.host}/ws/location/?token=${token}`)
     socketRef.current = ws
 
     ws.onopen = () => {
