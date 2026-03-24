@@ -1,7 +1,7 @@
 import datetime
 import urllib.parse
 import urllib.request
-from comrade_core.models import Task
+from comrade_core.models import Task, ChatMessage
 from django.conf import settings
 from django.contrib.auth import authenticate
 from django.contrib.auth.decorators import login_required
@@ -18,6 +18,7 @@ from django.contrib.auth import get_user_model
 from .serializers import UserDetailSerializer, TaskSerializer, SkillSerializer, TutorialTaskDetailSerializer, TutorialTaskFlatSerializer
 
 from django.core.exceptions import ValidationError
+from .ws_events import send_task_update, send_user_stats, send_achievements, send_friend_event
 from django.utils.timezone import now
 from .models import User, Rating, Review, Skill, LocationConfig, haversine_km, TutorialTask, TutorialPart, TutorialAnswer, TutorialProgress, Achievement, UserAchievement
 
@@ -134,6 +135,7 @@ class TaskStartView(APIView):
         except ValidationError as e:
             return Response({"error": str(e)}, status=status.HTTP_412_PRECONDITION_FAILED)
 
+        send_task_update(task, action='start', exclude_user_id=request.user.id)
         return Response(
             {"message": "Task started!"},
             status=status.HTTP_200_OK,
@@ -166,6 +168,7 @@ class TaskFinishView(APIView):
             review.photo = photo
         review.save()
 
+        send_task_update(task, action='finish', exclude_user_id=request.user.id)
         return Response({"message": "Task finished!"}, status=status.HTTP_200_OK)
 
 
@@ -190,6 +193,7 @@ class TaskRateView(APIView):
             feedback=feedback,
         )
         new_achievements = request.user.check_and_award_achievements()
+        send_achievements(request.user.id, new_achievements)
         return Response({"message": "Rating saved!", "new_achievements": _serialize_achievements(new_achievements)}, status=status.HTTP_200_OK)
 
 class TaskPauseView(APIView):
@@ -207,6 +211,7 @@ class TaskPauseView(APIView):
         except ValidationError as e:
             return Response({"error": str(e)}, status=status.HTTP_412_PRECONDITION_FAILED)
 
+        send_task_update(task, action='pause', exclude_user_id=request.user.id)
         return Response(
             {"message": "Task paused!"},
             status=status.HTTP_200_OK,
@@ -236,6 +241,7 @@ class TaskResumeView(APIView):
         except ValidationError as e:
             return Response({"error": str(e)}, status=status.HTTP_412_PRECONDITION_FAILED)
 
+        send_task_update(task, action='resume', exclude_user_id=request.user.id)
         return Response(
             {"message": "Task resumed!"},
             status=status.HTTP_200_OK,
@@ -288,6 +294,7 @@ class TaskAbandonView(APIView):
             task.abandon(request.user)
         except ValidationError as e:
             return Response({"error": str(e)}, status=status.HTTP_412_PRECONDITION_FAILED)
+        send_task_update(task, action='abandon', exclude_user_id=request.user.id)
         return Response({"message": "Task abandoned."}, status=status.HTTP_200_OK)
 
 
@@ -305,11 +312,19 @@ class TaskAcceptReviewView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_412_PRECONDITION_FAILED)
         earned_coins = task.coins if task.coins is not None else 0
         earned_xp = task.xp if task.xp is not None else 0
+
+        send_task_update(task, action='accept_review', exclude_user_id=request.user.id)
+        # Push stats and achievements to the ASSIGNEE (not the owner who called this)
+        if task.assignee:
+            task.assignee.refresh_from_db()
+            send_user_stats(task.assignee)
+            send_achievements(task.assignee.id, new_achievements)
+
         return Response({
             "message": "Review accepted, task marked as done.",
             "earned_coins": earned_coins,
             "earned_xp": earned_xp,
-            "new_achievements": _serialize_achievements(new_achievements),
+            "new_achievements": [],  # Achievements belong to assignee, pushed via WS
         }, status=status.HTTP_200_OK)
 
 
@@ -325,6 +340,7 @@ class TaskDeclineReviewView(APIView):
             task.decline_review(request.user)
         except ValidationError as e:
             return Response({"error": str(e)}, status=status.HTTP_412_PRECONDITION_FAILED)
+        send_task_update(task, action='decline_review', exclude_user_id=request.user.id)
         return Response({"message": "Review declined, task reset to open."}, status=status.HTTP_200_OK)
 
 
@@ -344,6 +360,7 @@ class TaskDebugResetView(APIView):
             return Response({"error": "Only the owner can reset the task"}, status=status.HTTP_403_FORBIDDEN)
 
         task.debug_reset()
+        send_task_update(task, action='reset', exclude_user_id=request.user.id)
         return Response(
             {"message": "Task reset to OPEN state"},
             status=status.HTTP_200_OK
@@ -355,6 +372,10 @@ def send_friend_request(request, user_id):
     try:
         target_user = User.objects.get(id=user_id)
         request.user.send_friend_request(target_user)
+        send_friend_event(target_user.id, {
+            'type': 'friend_request_received',
+            'from_user': {'id': request.user.id, 'username': request.user.username},
+        })
         return Response({'status': 'Friend request sent'}, status=status.HTTP_200_OK)
     except User.DoesNotExist:
         return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -402,7 +423,14 @@ def accept_friend_request(request, user_id):
             target_user_details
         )
 
+        # Notify the sender that their request was accepted
+        send_friend_event(target_user.id, {
+            'type': 'friend_request_accepted',
+            'user': {'id': request.user.id, 'username': request.user.username},
+        })
+
         new_achievements = request.user.check_and_award_achievements()
+        send_achievements(request.user.id, new_achievements)
         return Response({'status': 'Friend request accepted', 'new_achievements': _serialize_achievements(new_achievements)}, status=status.HTTP_200_OK)
     except User.DoesNotExist:
         return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -415,6 +443,10 @@ def reject_friend_request(request, user_id):
     try:
         target_user = User.objects.get(id=user_id)
         request.user.reject_friend_request(target_user)
+        send_friend_event(target_user.id, {
+            'type': 'friend_request_rejected',
+            'user_id': request.user.id,
+        })
         return Response({'status': 'Friend request rejected'}, status=status.HTTP_200_OK)
     except User.DoesNotExist:
         return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -427,6 +459,10 @@ def remove_friend(request, user_id):
     try:
         target_user = User.objects.get(id=user_id)
         request.user.remove_friend(target_user)
+        send_friend_event(target_user.id, {
+            'type': 'friend_removed',
+            'user_id': request.user.id,
+        })
         return Response({'status': 'Friend removed'}, status=status.HTTP_200_OK)
     except User.DoesNotExist:
         return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -446,6 +482,48 @@ def get_pending_requests(request):
     pending_requests = request.user.get_pending_friend_requests()
     serializer = UserDetailSerializer(pending_requests, many=True)
     return Response({'pending_requests': serializer.data}, status=status.HTTP_200_OK)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def chat_history(request):
+    """Return the last 100 chat messages from friends only."""
+    friend_ids = request.user.friends.values_list('id', flat=True)
+    messages = (
+        ChatMessage.objects
+        .filter(sender__in=[request.user.id, *friend_ids])
+        .select_related('sender')
+        .order_by('-created_at')[:100]
+    )
+    data = [
+        {
+            'id': m.id,
+            'text': m.text,
+            'sender': m.sender.username,
+            'timestamp': m.created_at.isoformat(),
+        }
+        for m in reversed(messages)
+    ]
+    return Response({'messages': data}, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def welcome_message(request):
+    """Return the welcome message if the user has not accepted it yet."""
+    if request.user.welcome_accepted:
+        return Response({'show': False}, status=status.HTTP_200_OK)
+    config = LocationConfig.get_config()
+    return Response({'show': True, 'message': config.welcome_message}, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def welcome_accept(request):
+    """Mark the welcome message as accepted for this user."""
+    request.user.welcome_accepted = True
+    request.user.save(update_fields=['welcome_accepted'])
+    return Response({'status': 'ok'}, status=status.HTTP_200_OK)
+
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -535,6 +613,8 @@ class TutorialSubmitPartView(APIView):
             progress.datetime_finish = now()
             progress.save()
             new_achievements = request.user.check_and_award_achievements()
+            send_user_stats(request.user)
+            send_achievements(request.user.id, new_achievements)
             return Response({"completed": True, "reward_skill": tutorial.reward_skill.name, "new_achievements": _serialize_achievements(new_achievements)})
 
         return Response({"completed": False, "part_id": part.id})
@@ -601,6 +681,7 @@ class ProximitySettingsView(APIView):
         config = LocationConfig.get_config()
         return Response({
             'radius_km': config.task_proximity_km,
+            'max_distance_km': config.max_distance_km,
             'coins_modifier': config.coins_modifier,
             'xp_modifier': config.xp_modifier,
             'time_modifier_minutes': config.time_modifier_minutes,
@@ -704,6 +785,7 @@ class TaskCreateView(APIView):
             return Response({"error": "Only admins can create tasks"}, status=status.HTTP_403_FORBIDDEN)
 
         data = request.data
+        _tobool = lambda v: str(v).lower() in ('true', '1', 'yes') if isinstance(v, str) else bool(v)
         name = data.get('name', '').strip()
         if not name:
             return Response({"error": "Name is required"}, status=status.HTTP_400_BAD_REQUEST)
@@ -717,6 +799,8 @@ class TaskCreateView(APIView):
             except (ValueError, AttributeError):
                 pass
 
+        photo = request.FILES.get('photo')
+
         task = Task(
             name=name,
             description=data.get('description', ''),
@@ -726,14 +810,16 @@ class TaskCreateView(APIView):
             minutes=data.get('minutes', 60),
             coins=data.get('coins') or None,
             xp=data.get('xp') or None,
-            respawn=bool(data.get('respawn', False)),
+            respawn=_tobool(data.get('respawn', False)),
             respawn_time=respawn_time or datetime.time(10, 0, 0),
             respawn_offset=data.get('respawn_offset') or None,
-            require_photo=data.get('require_photo', False),
-            require_comment=data.get('require_comment', False),
+            require_photo=_tobool(data.get('require_photo', False)),
+            require_comment=_tobool(data.get('require_comment', False)),
             owner=user,
             state=Task.State.OPEN,
         )
+        if photo:
+            task.photo = photo
         task.save()
 
         skill_read_ids = data.get('skill_read', [])
@@ -817,10 +903,18 @@ def google_oauth_callback(request):
             'last_name': id_info.get('family_name', ''),
         },
     )
-    if not created and not user.first_name:
+    # Update profile info from Google on every login
+    update_fields = []
+    if not user.first_name:
         user.first_name = id_info.get('given_name', '')
         user.last_name = id_info.get('family_name', '')
-        user.save(update_fields=['first_name', 'last_name'])
+        update_fields += ['first_name', 'last_name']
+    picture = id_info.get('picture', '')
+    if picture and user.profile_picture != picture:
+        user.profile_picture = picture
+        update_fields.append('profile_picture')
+    if update_fields:
+        user.save(update_fields=update_fields)
 
     drf_token, _ = Token.objects.get_or_create(user=user)
     return redirect(f'/?google_token={drf_token.key}')

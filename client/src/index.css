@@ -14,7 +14,7 @@
   --pip-font: monospace;
   --pip-btn-hover-bg: rgba(46, 194, 126, 0.15);
   --pip-popup-hover-bg: rgba(46, 194, 126, 0.2);
-  --pip-scanlines-opacity: 0.3;
+  --pip-scanlines-opacity: 0;
   --pip-scrollbar-track: #050805;
   /* Layout */
   --nav-height: 72px;
@@ -43,10 +43,10 @@
   --pip-border: #8b6914;
   --pip-text: #e8c87a;
   --pip-glow: 0 0 10px rgba(212, 168, 67, 0.5);
-  --pip-font: 'Cinzel', 'Palatino Linotype', Palatino, serif;
+  --pip-font: monospace;
   --pip-btn-hover-bg: rgba(212, 168, 67, 0.15);
   --pip-popup-hover-bg: rgba(212, 168, 67, 0.2);
-  --pip-scanlines-opacity: 0.12;
+  --pip-scanlines-opacity: 0;
   --pip-scrollbar-track: #110d04;
   /* Glassmorphism desert */
   --glass-bg: rgba(28, 20, 8, 0.75);
@@ -87,6 +87,20 @@ body::after {
   opacity: var(--pip-scanlines-opacity);
 }
 
+/* CRT scanlines on pip-boy login screen only */
+:root .login-crt::after {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.1) 2px, rgba(0,0,0,0.1) 4px);
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.3;
+}
+[data-theme="desert"] .login-crt::after {
+  opacity: 0;
+}
+
 #root {
   width: 100%;
   height: 100dvh;
@@ -95,9 +109,13 @@ body::after {
   overflow: hidden;
 }
 
-/* Prevent iOS zoom on input focus */
+/* Prevent iOS zoom on input focus (mobile only) */
+@media (max-width: 768px) {
+  input, textarea, select {
+    font-size: 16px !important;
+  }
+}
 input, textarea, select {
-  font-size: 16px !important;
   font-family: var(--pip-font);
 }
 
@@ -257,7 +275,7 @@ input.rating-slider::-moz-range-thumb {
   border-radius: 0 !important;
 }
 .leaflet-popup-tip { background: var(--pip-border) !important; }
-.leaflet-popup-close-button { color: var(--pip-green) !important; font-size: 20px !important; padding: 6px !important; }
+.leaflet-popup-close-button { color: var(--pip-green) !important; font-size: 20px !important; top: 6px !important; right: 8px !important; }
 
 /* ── Task map markers ─────────────────────────────────────────────────────── */
 .task-marker-dot {

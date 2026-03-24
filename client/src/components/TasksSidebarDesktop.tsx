@@ -8,6 +8,7 @@ interface Props {
   userSkills: string[]
   selfLocation: { lat: number; lon: number } | null
   proximityKm: number
+  maxDistanceKm: number
   coinsModifier: number
   xpModifier: number
   timeModifierMinutes: number
@@ -34,7 +35,7 @@ function canReview(task: Task, userId: number, userSkills: string[]): boolean {
   return (task.skill_write_names?.length ?? 0) > 0 && (task.skill_write_names ?? []).some((s) => userSkills.includes(s))
 }
 
-export default function TasksSidebar({ tasks, userId, userSkills, selfLocation, proximityKm, coinsModifier, xpModifier, timeModifierMinutes, criticalityPercentage, pauseMultiplier, onTaskClick, onAction }: Props) {
+export default function TasksSidebar({ tasks, userId, userSkills, selfLocation, proximityKm, maxDistanceKm, coinsModifier, xpModifier, timeModifierMinutes, criticalityPercentage, pauseMultiplier, onTaskClick, onAction }: Props) {
   const getDistance = (task: Task): number | null => {
     if (!selfLocation || task.lat == null || task.lon == null) return null
     return haversineKm(selfLocation.lat, selfLocation.lon, task.lat, task.lon)
@@ -42,6 +43,10 @@ export default function TasksSidebar({ tasks, userId, userSkills, selfLocation, 
   const inProximity = (task: Task): boolean => {
     const d = getDistance(task)
     return d === null || d <= proximityKm
+  }
+  const inMaxRange = (task: Task): boolean => {
+    const d = getDistance(task)
+    return d === null || d <= maxDistanceKm
   }
 
   const activeTasks = tasks.filter((t) =>
@@ -60,10 +65,11 @@ export default function TasksSidebar({ tasks, userId, userSkills, selfLocation, 
     })
   const startableTasks = tasks
     .filter((t) =>
-      t.is_tutorial
+      (t.is_tutorial
         ? !t.in_progress
         : t.owner !== userId && t.state !== 2 && t.state !== 3 && t.state !== 4 &&
           (t.state !== 5 || t.datetime_respawn != null)
+      ) && inMaxRange(t)
     )
     .sort((a, b) => {
       const canExec = (t: Task) => t.skill_execute_names.length === 0 || t.skill_execute_names.some((s) => userSkills.includes(s))
@@ -97,10 +103,10 @@ export default function TasksSidebar({ tasks, userId, userSkills, selfLocation, 
 
   const displayedTasks = view === 'active' ? activeTasks : view === 'owned' ? ownedTasks : startableTasks
 
-  const HEADER: Record<View, string> = { all: 'My Tasks', active: 'Active Tasks', owned: 'Owned Tasks' }
+  const HEADER: Record<View, string> = { all: 'Tasks', active: 'Active Tasks', owned: 'Owned Tasks' }
 
   const tabs: { key: View; label: string }[] = [
-    { key: 'all', label: 'All' },
+    { key: 'all', label: 'Nearby' },
     { key: 'active', label: activeTasks.length > 0 ? `Active (${activeTasks.length})` : 'Active' },
     ...(ownedTasks.length > 0 ? [{ key: 'owned' as View, label: ownedTasks.filter((t) => t.state === 4).length > 0 ? `Owned (${ownedTasks.filter((t) => t.state === 4).length})` : 'Owned' }] : []),
   ]
@@ -302,8 +308,7 @@ export default function TasksSidebar({ tasks, userId, userSkills, selfLocation, 
                   )}
                   {/* Pending review badge */}
                   {task.pending_review && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setReviewTask(task) }}
+                    <span
                       style={{
                         fontSize: '0.55rem',
                         padding: '1px 6px',
@@ -311,14 +316,13 @@ export default function TasksSidebar({ tasks, userId, userSkills, selfLocation, 
                         border: '1px solid rgba(230,126,34,0.6)',
                         color: '#e67e22',
                         borderRadius: '2px',
-                        cursor: 'pointer',
                         fontFamily: 'var(--pip-font)',
                         textTransform: 'uppercase',
                         letterSpacing: '0.05em',
                       }}
                     >
                       Pending Review
-                    </button>
+                    </span>
                   )}
                 </div>
                 {task.skill_execute_names.length > 0 && (

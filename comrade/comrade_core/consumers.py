@@ -5,7 +5,7 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.contrib.auth.models import AnonymousUser
 from rest_framework.authtoken.models import Token
-from .models import User
+from .models import User, ChatMessage
 
 class LocationConsumer(AsyncWebsocketConsumer):
     async def connect(self):
@@ -23,6 +23,16 @@ class LocationConsumer(AsyncWebsocketConsumer):
                     self.channel_name
                 )
                 await self.accept()
+
+                # Notify friends that this user came online
+                friends = await database_sync_to_async(lambda: list(self.user.get_friends()))()
+                online_msg = {
+                    'type': 'friend_online',
+                    'userId': self.user.id,
+                    'name': f"{self.user.first_name} {self.user.last_name}".strip() or self.user.username,
+                }
+                for friend in friends:
+                    await self.channel_layer.group_send(f"location_{friend.id}", online_msg)
             else:
                 await self.close()
         except Token.DoesNotExist:
@@ -85,10 +95,17 @@ class LocationConsumer(AsyncWebsocketConsumer):
         if data.get('type') == 'chat_message':
             message = data.get('message')
             sender = data.get('sender')
-            
+
+            # Persist to database
+            msg = await database_sync_to_async(ChatMessage.objects.create)(
+                sender=self.user, text=message
+            )
+            msg_id = msg.id
+            timestamp = msg.created_at.isoformat()
+
             # Get user's friends
             friends = await database_sync_to_async(lambda: list(self.user.get_friends()))()
-            
+
             # Send message to all friends
             for friend in friends:
                 friend_location_group = f"location_{friend.id}"
@@ -97,7 +114,9 @@ class LocationConsumer(AsyncWebsocketConsumer):
                     {
                         'type': 'chat_message',
                         'message': message,
-                        'sender': sender
+                        'sender': sender,
+                        'msg_id': msg_id,
+                        'timestamp': timestamp,
                     }
                 )
             return
@@ -108,6 +127,9 @@ class LocationConsumer(AsyncWebsocketConsumer):
             longitude = data['longitude']
             accuracy = data.get('accuracy', 50)  # Default accuracy if not provided
 
+            # Refresh user from DB to pick up profile_picture and other changes
+            await database_sync_to_async(self.user.refresh_from_db)()
+
             # Get user's friends and skills for updates
             friends = await database_sync_to_async(lambda: list(self.user.get_friends()))()
             skills = await database_sync_to_async(
@@ -116,7 +138,7 @@ class LocationConsumer(AsyncWebsocketConsumer):
 
             # Save location regardless of sharing preferences
             await self.save_user_location(self.user, latitude, longitude)
-            print(f"[{timezone.now()}] Location saved for {self.user.username} at {latitude}, {longitude}")
+            print(f"[{timezone.now()}] Location saved for {self.user.username} at {latitude}, {longitude} profile_picture={self.user.profile_picture!r}")
 
             # Only proceed with sharing if not set to NONE
             if self.user.location_sharing_level != User.SharingLevel.NONE:
@@ -130,7 +152,8 @@ class LocationConsumer(AsyncWebsocketConsumer):
                     'accuracy': accuracy,
                     'timestamp': timezone.now().isoformat(),
                     'friends': [{'id': f.id, 'name': f"{f.first_name} {f.last_name}".strip() or f.username} for f in friends],
-                    'skills': skills
+                    'skills': skills,
+                    'profile_picture': self.user.profile_picture or '',
                 }
 
                 # Send detailed update to all friends - assume they're all active
@@ -154,7 +177,7 @@ class LocationConsumer(AsyncWebsocketConsumer):
                         'latitude': latitude,
                         'longitude': longitude,
                         'accuracy': accuracy,
-                        'timestamp': timezone.now().isoformat()
+                        'timestamp': timezone.now().isoformat(),
                     }
 
                     # Get ALL users except self and friends
@@ -200,7 +223,8 @@ class LocationConsumer(AsyncWebsocketConsumer):
             'accuracy': event['accuracy'],
             'timestamp': event['timestamp'],
             'friends': event['friends'],
-            'skills': event['skills']
+            'skills': event['skills'],
+            'profile_picture': event.get('profile_picture', ''),
         }))
 
     async def public_location(self, event):
@@ -271,8 +295,36 @@ class LocationConsumer(AsyncWebsocketConsumer):
         await self.send(text_data=json.dumps({
             'type': 'chat_message',
             'message': event['message'],
-            'sender': event['sender']
+            'sender': event['sender'],
+            'msg_id': event.get('msg_id'),
+            'timestamp': event.get('timestamp'),
         }))
+
+    # ── Real-time event handlers (forwarded from ws_events.py) ──
+
+    async def task_update(self, event):
+        await self.send(text_data=json.dumps(event))
+
+    async def user_stats_update(self, event):
+        await self.send(text_data=json.dumps(event))
+
+    async def achievement_earned(self, event):
+        await self.send(text_data=json.dumps(event))
+
+    async def friend_request_received(self, event):
+        await self.send(text_data=json.dumps(event))
+
+    async def friend_request_accepted(self, event):
+        await self.send(text_data=json.dumps(event))
+
+    async def friend_request_rejected(self, event):
+        await self.send(text_data=json.dumps(event))
+
+    async def friend_removed(self, event):
+        await self.send(text_data=json.dumps(event))
+
+    async def friend_online(self, event):
+        await self.send(text_data=json.dumps(event))
 
 from urllib.parse import parse_qs
 from asgiref.sync import sync_to_async

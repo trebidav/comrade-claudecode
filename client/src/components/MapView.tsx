@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { MapContainer, TileLayer, CircleMarker, Circle, Marker, Popup, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import api, { type Task, type User, type NewAchievement, STATE_LABELS, haversineKm, formatDistance, formatMinutes, formatCountdown, realTaskId } from '../api'
-import { getTheme, applyTheme, TILE_CONFIGS, type TileConfig } from '../theme'
+import { getTheme, applyTheme, TILE_CONFIGS, getGoogleTileUrl, invalidateGoogleSession, type TileConfig, type Theme } from '../theme'
 import Chat from './Chat'
 import TasksSidebar from './TasksSidebar'
 import ActiveTaskPanel from './ActiveTaskPanel'
@@ -143,15 +143,53 @@ function makePin(symbol: 'exclaim' | 'question' | 'book', fill: string): string 
   </svg>`
 }
 
+function makeSmallDot(color: string): L.DivIcon {
+  return L.divIcon({
+    className: '',
+    html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4)"></div>`,
+    iconSize: [14, 14], iconAnchor: [7, 7],
+  })
+}
+
 function taskIcon(
   task: Task,
   currentUserId: number,
   currentUserSkills: string[],
   selfLocation: { lat: number; lon: number } | null,
   proximityKm: number,
+  maxDistanceKm: number,
 ): L.DivIcon {
   const isMyTask = task.assignee === currentUserId
   const isTutorialActive = task.is_tutorial && !!task.in_progress
+
+  // Compute distance once for reuse
+  const distKm = selfLocation && task.lat != null && task.lon != null
+    ? haversineKm(selfLocation.lat, selfLocation.lon, task.lat, task.lon) : null
+  const outOfMaxRange = distKm !== null && distKm > maxDistanceKm
+
+  // Determine the task color using the same logic for both pins and dots
+  let taskColor = '#555' // default: unavailable/done
+
+  if (task.is_tutorial) {
+    taskColor = '#4285F4'
+  } else if (isMyTask && task.state === 2) {
+    taskColor = '#FBBC05'
+  } else if (isMyTask && task.state === 3) {
+    taskColor = '#777'
+  } else if (task.state === 1) {
+    const hasSkill = task.skill_execute_names.length === 0 || task.skill_execute_names.some((s) => currentUserSkills.includes(s))
+    if (!hasSkill) {
+      taskColor = '#777'
+    } else {
+      const outOfReach = distKm !== null && distKm > proximityKm
+      taskColor = outOfReach ? '#b8860b' : '#FBBC05'
+    }
+  }
+
+  // Out of max range — small colored dot
+  if (outOfMaxRange && !isMyTask) {
+    return makeSmallDot(taskColor)
+  }
 
   // My active task (tutorial in-progress) — spinner
   if (isTutorialActive) {
@@ -162,57 +200,23 @@ function taskIcon(
     })
   }
 
-  // Tutorial available — book icon
+  // Tutorial — blue book pin
   if (task.is_tutorial) {
-    return L.divIcon({
-      className: '',
-      html: makePin('book', '#4285F4'),
-      iconSize: [28, 40], iconAnchor: [14, 39],
-    })
+    return L.divIcon({ className: '', html: makePin('book', taskColor), iconSize: [28, 40], iconAnchor: [14, 39] })
   }
 
-  // My active task — yellow ?
-  if (isMyTask && task.state === 2) {
-    return L.divIcon({
-      className: '',
-      html: makePin('question', '#FBBC05'),
-      iconSize: [28, 40], iconAnchor: [14, 39],
-    })
+  // My active/paused task — question pin
+  if (isMyTask && (task.state === 2 || task.state === 3)) {
+    return L.divIcon({ className: '', html: makePin('question', taskColor), iconSize: [28, 40], iconAnchor: [14, 39] })
   }
 
-  // My paused task — grey ?
-  if (isMyTask && task.state === 3) {
-    return L.divIcon({
-      className: '',
-      html: makePin('question', '#777'),
-      iconSize: [28, 40], iconAnchor: [14, 39],
-    })
-  }
-
-  // Open task
+  // Open task — exclaim pin
   if (task.state === 1) {
-    const hasSkill = task.skill_execute_names.length === 0 || task.skill_execute_names.some((s) => currentUserSkills.includes(s))
-    if (!hasSkill) {
-      // Grey ! — missing skill
-      return L.divIcon({ className: '', html: makePin('exclaim', '#777'), iconSize: [28, 40], iconAnchor: [14, 39] })
-    }
-    const distKm = selfLocation && task.lat != null && task.lon != null
-      ? haversineKm(selfLocation.lat, selfLocation.lon, task.lat, task.lon) : null
-    const outOfReach = distKm !== null && distKm > proximityKm
-    if (outOfReach) {
-      // Dark amber ! — out of range
-      return L.divIcon({ className: '', html: makePin('exclaim', '#b8860b'), iconSize: [28, 40], iconAnchor: [14, 39] })
-    }
-    // Bright yellow ! — available, go!
-    return L.divIcon({ className: '', html: makePin('exclaim', '#FBBC05'), iconSize: [28, 40], iconAnchor: [14, 39] })
+    return L.divIcon({ className: '', html: makePin('exclaim', taskColor), iconSize: [28, 40], iconAnchor: [14, 39] })
   }
 
   // Unavailable / done — tiny grey dot
-  return L.divIcon({
-    className: '',
-    html: `<div style="width:14px;height:14px;border-radius:50%;background:#555;border:2px solid rgba(255,255,255,0.3);box-shadow:0 1px 4px rgba(0,0,0,0.4)"></div>`,
-    iconSize: [14, 14], iconAnchor: [7, 7],
-  })
+  return makeSmallDot('#555')
 }
 
 interface Props {
@@ -231,6 +235,7 @@ export default function MapView({ user, onLogout }: Props) {
   const [ratingTarget, setRatingTarget] = useState<{ id: number; name: string; requireComment: boolean } | null>(null)
   const [createTaskPos, setCreateTaskPos] = useState<{ lat: number; lon: number } | null>(null)
   const [proximityKm, setProximityKm] = useState(1.0)
+  const [maxDistanceKm, setMaxDistanceKm] = useState(1.0)
   const [coinsModifier, setCoinsModifier] = useState(100.0)
   const [xpModifier, setXpModifier] = useState(1.0)
   const [timeModifierMinutes, setTimeModifierMinutes] = useState(15.0)
@@ -247,14 +252,21 @@ export default function MapView({ user, onLogout }: Props) {
 
   useEffect(() => {
     const theme = getTheme()
+    const loadTiles = async (t: Theme) => {
+      const google = await getGoogleTileUrl(t)
+      setTileConfig(google ?? TILE_CONFIGS[t])
+    }
     applyTheme(theme)
-    setTileConfig(TILE_CONFIGS[theme])
-    const onThemeChange = () => setTileConfig(TILE_CONFIGS[getTheme()])
+    loadTiles(theme)
+    const onThemeChange = () => loadTiles(getTheme())
     window.addEventListener('comrade-theme-change', onThemeChange)
     return () => window.removeEventListener('comrade-theme-change', onThemeChange)
   }, [])
 
-  const { friends, publicUsers, chatMessages, selfLocation, sendChatMessage } = useLocationSocket({
+  const {
+    friends, publicUsers, chatMessages, selfLocation, sendChatMessage,
+    friendEvents, clearFriendEvents, onlineFriendIds,
+  } = useLocationSocket({
     token,
     username: user.username,
     userId: user.id,
@@ -287,6 +299,7 @@ export default function MapView({ user, onLogout }: Props) {
     fetchTasks()
     api.get('/settings/proximity/').then((res) => {
       setProximityKm(res.data.radius_km ?? 1.0)
+      setMaxDistanceKm(res.data.max_distance_km ?? 1.0)
       setCoinsModifier(res.data.coins_modifier ?? 100.0)
       setXpModifier(res.data.xp_modifier ?? 1.0)
       setTimeModifierMinutes(res.data.time_modifier_minutes ?? 15.0)
@@ -369,7 +382,7 @@ export default function MapView({ user, onLogout }: Props) {
           zoomControl={false}
           attributionControl={false}
         >
-          <TileLayer key={tileConfig.url} attribution={tileConfig.attribution} url={tileConfig.url} />
+          <TileLayer key={tileConfig.url} attribution={tileConfig.attribution} url={tileConfig.url} crossOrigin="anonymous" maxZoom={18} maxNativeZoom={18} updateWhenZooming={false} eventHandlers={{ tileerror: () => { if (tileConfig.url.includes('tile.googleapis.com')) { const t = getTheme(); invalidateGoogleSession(t); setTileConfig(TILE_CONFIGS[t]) } } }} />
           <RecenterOnMount lat={centerLat} lon={centerLon} />
           <MapPanTo target={panTarget} />
           <CenterOnMeListener />
@@ -460,7 +473,7 @@ export default function MapView({ user, onLogout }: Props) {
           {tasks
             .filter((t) => t.lat != null && t.lon != null)
             .map((task) => {
-              const icon = taskIcon(task, currentUser.id, currentUser.skills, selfLocation, proximityKm)
+              const icon = taskIcon(task, currentUser.id, currentUser.skills, selfLocation, proximityKm, maxDistanceKm)
               return (
                 <Marker
                   key={`${task.is_tutorial ? 't' : 'r'}-${task.id}`}
@@ -552,8 +565,9 @@ export default function MapView({ user, onLogout }: Props) {
         activeTask.is_tutorial ? (
           <TutorialPanel
             task={activeTask}
-            onCompleted={(id, name) => { setRatingTarget({ id, name, requireComment: false }); fetchTasks() }}
+            onCompleted={() => { fetchTasks() }}
             onLocate={handleTaskClick}
+            onAction={handleTaskAction}
             onNewAchievements={(a) => setAchievementToasts((prev) => [...prev, ...a])}
           />
         ) : (
@@ -613,6 +627,7 @@ export default function MapView({ user, onLogout }: Props) {
           userSkills={currentUser.skills}
           selfLocation={selfLocation}
           proximityKm={proximityKm}
+          maxDistanceKm={maxDistanceKm}
           coinsModifier={coinsModifier}
           xpModifier={xpModifier}
           timeModifierMinutes={timeModifierMinutes}
@@ -640,7 +655,7 @@ export default function MapView({ user, onLogout }: Props) {
         title="Profile"
         height="full"
       >
-        <UserInfoPanel user={currentUser} onLogout={onLogout} />
+        <UserInfoPanel user={currentUser} onLogout={onLogout} onlineFriendIds={onlineFriendIds} friendEvents={friendEvents} clearFriendEvents={clearFriendEvents} />
       </BottomSheet>
 
       {/* Task detail sheet (tapping marker on map) */}
@@ -844,8 +859,8 @@ function TaskDetailContent({
         )}
 
         {!task.is_tutorial && task.state === 1 && !isAssignee && canStart && !inProximity && (
-          <div style={{ padding: '10px', background: 'rgba(251,188,5,0.08)', border: '1px solid rgba(251,188,5,0.3)', fontSize: '0.8rem', color: '#FBBC05', textAlign: 'center' }}>
-            Out of proximity range
+          <div style={{ padding: '10px', background: 'rgba(184,134,11,0.08)', border: '1px solid rgba(184,134,11,0.3)', fontSize: '0.8rem', color: '#b8860b', textAlign: 'center' }}>
+            Out of range
           </div>
         )}
 

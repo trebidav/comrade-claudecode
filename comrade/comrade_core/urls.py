@@ -15,7 +15,7 @@ urlpatterns = [
     path('task/<int:taskId>/resume', views.TaskResumeView.as_view(), name='resume_task'),
     path('task/<int:taskId>/accept_review', views.TaskAcceptReviewView.as_view(), name='accept_review_task'),
     path('task/<int:taskId>/decline_review', views.TaskDeclineReviewView.as_view(), name='decline_review_task'),
-    path('task/<int:taskId>/debug_reset', views.TaskDebugResetView.as_view(), name='debug_reset_task'),
+    path('task/<int:taskId>/reset', views.TaskDebugResetView.as_view(), name='reset_task'),
     path('task/<int:taskId>/rate', views.TaskRateView.as_view(), name='rate_task'),
     path('tasks/', views.TaskListView.as_view(), name='task_list'),
     path('tasks/create', views.TaskCreateView.as_view(), name='create_task'),
@@ -36,6 +36,9 @@ urlpatterns = [
     path('friends/sent/', views.get_sent_requests, name='get_sent_requests'),
     path('location/preferences/', views.LocationSharingPreferencesView.as_view(), name='location_preferences'),
     path('user/token/', views.token_login_view, name='token_login'),
+    path('chat/history/', views.chat_history, name='chat_history'),
+    path('welcome/', views.welcome_message, name='welcome_message'),
+    path('welcome/accept/', views.welcome_accept, name='welcome_accept'),
 ]
 
 websocket_urlpatterns = [
