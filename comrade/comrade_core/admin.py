@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.forms import UserChangeForm
 
-from .models import Skill, Task, User, LocationConfig, Rating, Review, TutorialTask, TutorialPart, TutorialQuestion, TutorialAnswer, TutorialProgress, Achievement, UserAchievement
+from .models import Skill, Task, User, LocationConfig, Rating, Review, TutorialTask, TutorialPart, TutorialQuestion, TutorialAnswer, TutorialProgress, Achievement, UserAchievement, ChatMessage
 
 
 class UserChangeForm(UserChangeForm):
@@ -27,7 +27,7 @@ class ComradeUserAdmin(UserAdmin):
     # Define fieldsets explicitly, extending the default UserAdmin fieldsets
     fieldsets = (
         (None, {'fields': ('username', 'password')}),
-        ('Personal info', {'fields': ('first_name', 'last_name', 'email')}),
+        ('Personal info', {'fields': ('first_name', 'last_name', 'email', 'profile_picture')}),
         ('Permissions', {
             'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions'),
         }),
@@ -40,6 +40,9 @@ class ComradeUserAdmin(UserAdmin):
         }),
         ('Stats', {
             'fields': ('coins', 'xp', 'total_coins_earned', 'total_xp_earned', 'task_streak')
+        }),
+        ('Welcome', {
+            'fields': ('welcome_accepted',)
         }),
         ('Skills & Friends', {
             'fields': (
@@ -98,6 +101,12 @@ class SkillAdmin(admin.ModelAdmin):
 class LocationConfigAdmin(admin.ModelAdmin):
     list_display = ['max_distance_km', 'task_proximity_km', 'coins_modifier', 'xp_modifier', 'time_modifier_minutes', 'criticality_percentage', 'pause_multiplier', 'level_modifier', 'last_updated']
     readonly_fields = ['last_updated']
+    fieldsets = (
+        ('Distance & Proximity', {'fields': ('max_distance_km', 'task_proximity_km')}),
+        ('Reward Modifiers', {'fields': ('coins_modifier', 'xp_modifier', 'time_modifier_minutes', 'criticality_percentage', 'pause_multiplier', 'level_modifier')}),
+        ('Welcome Message', {'fields': ('welcome_message',)}),
+        ('Meta', {'fields': ('last_updated',)}),
+    )
 
 
 class RatingAdmin(admin.ModelAdmin):
@@ -201,6 +210,13 @@ class UserAchievementAdmin(admin.ModelAdmin):
     readonly_fields = ['datetime_earned']
 
 
+class ChatMessageAdmin(admin.ModelAdmin):
+    list_display = ['sender', 'text', 'created_at']
+    list_filter = ['sender']
+    search_fields = ['text', 'sender__username']
+    readonly_fields = ['created_at']
+
+
 admin.site.register(User, ComradeUserAdmin)
 admin.site.register(Task, TaskAdmin)
 admin.site.register(Skill, SkillAdmin)
@@ -213,3 +229,4 @@ admin.site.register(TutorialQuestion, TutorialQuestionAdmin)
 admin.site.register(TutorialProgress, TutorialProgressAdmin)
 admin.site.register(Achievement, AchievementAdmin)
 admin.site.register(UserAchievement, UserAchievementAdmin)
+admin.site.register(ChatMessage, ChatMessageAdmin)

@@ -11,6 +11,7 @@ interface Props {
   userSkills: string[]
   selfLocation: { lat: number; lon: number } | null
   proximityKm: number
+  maxDistanceKm: number
   coinsModifier: number
   xpModifier: number
   timeModifierMinutes: number
@@ -32,7 +33,7 @@ function canReview(task: Task, userId: number, userSkills: string[]): boolean {
   return (task.skill_write_names?.length ?? 0) > 0 && (task.skill_write_names ?? []).some((s) => userSkills.includes(s))
 }
 
-export default function TasksSidebar({ tasks, userId, userSkills, selfLocation, proximityKm, coinsModifier, xpModifier, timeModifierMinutes, criticalityPercentage, pauseMultiplier, onTaskClick, onAction }: Props) {
+export default function TasksSidebar({ tasks, userId, userSkills, selfLocation, proximityKm, maxDistanceKm, coinsModifier, xpModifier, timeModifierMinutes, criticalityPercentage, pauseMultiplier, onTaskClick, onAction }: Props) {
   const haptics = useHaptics()
 
   const getDistance = (task: Task): number | null => {
@@ -42,6 +43,10 @@ export default function TasksSidebar({ tasks, userId, userSkills, selfLocation, 
   const inProximity = (task: Task): boolean => {
     const d = getDistance(task)
     return d === null || d <= proximityKm
+  }
+  const inMaxRange = (task: Task): boolean => {
+    const d = getDistance(task)
+    return d === null || d <= maxDistanceKm
   }
 
   const activeTasks = tasks.filter((t) =>
@@ -60,10 +65,11 @@ export default function TasksSidebar({ tasks, userId, userSkills, selfLocation, 
     })
   const startableTasks = tasks
     .filter((t) =>
-      t.is_tutorial
+      (t.is_tutorial
         ? !t.in_progress
         : t.owner !== userId && t.state !== 2 && t.state !== 3 && t.state !== 4 &&
           (t.state !== 5 || t.datetime_respawn != null)
+      ) && inMaxRange(t)
     )
     .sort((a, b) => {
       const canExec = (t: Task) => t.skill_execute_names.length === 0 || t.skill_execute_names.some((s) => userSkills.includes(s))
@@ -104,7 +110,7 @@ export default function TasksSidebar({ tasks, userId, userSkills, selfLocation, 
   const displayedTasks = view === 'active' ? activeTasks : view === 'owned' ? ownedTasks : startableTasks
 
   const tabs: { key: View; label: string; badge?: number }[] = [
-    { key: 'all', label: 'All', badge: startableTasks.length },
+    { key: 'all', label: 'Nearby', badge: startableTasks.length },
     { key: 'active', label: 'Active', badge: activeTasks.length },
     ...(ownedTasks.length > 0 ? [{ key: 'owned' as View, label: 'Owned', badge: ownedTasks.filter((t) => t.state === 4).length || undefined }] : []),
   ]
@@ -193,8 +199,9 @@ export default function TasksSidebar({ tasks, userId, userSkills, selfLocation, 
             displayedTasks.map((task, index) => {
               const dist = getDistance(task)
               const canExecute = task.skill_execute_names.length === 0 || task.skill_execute_names.some((s) => userSkills.includes(s))
-              const near = view !== 'all' || (inProximity(task) && canExecute)
+              const isReachable = view !== 'all' || (inProximity(task) && canExecute)
               const isActive = task.is_tutorial ? task.in_progress : task.state === 2
+              const greyed = !isReachable || task.state === 5
 
               return (
                 <div
@@ -206,9 +213,10 @@ export default function TasksSidebar({ tasks, userId, userSkills, selfLocation, 
                     borderBottom: '1px solid rgba(26, 115, 70, 0.2)',
                     borderLeft: isActive ? '3px solid #FBBC05' : '3px solid transparent',
                     cursor: 'pointer',
-                    opacity: task.state === 5 ? 0.45 : (near ? 1 : 0.5),
+                    opacity: greyed ? 0.35 : 1,
+                    filter: greyed ? 'grayscale(0.6)' : 'none',
                     touchAction: 'manipulation',
-                    transition: 'background 0.12s',
+                    transition: 'background 0.12s, opacity 0.15s, filter 0.15s',
                     animationDelay: `${Math.min(index, 5) * 40}ms`,
                   }}
                   onPointerDown={(e) => { e.currentTarget.style.background = 'var(--pip-btn-hover-bg)' }}
@@ -277,8 +285,7 @@ export default function TasksSidebar({ tasks, userId, userSkills, selfLocation, 
                       </span>
                     )}
                     {task.pending_review && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); haptics.medium(); setReviewTask(task) }}
+                      <span
                         style={{
                           fontSize: '0.65rem',
                           padding: '3px 8px',
@@ -286,15 +293,12 @@ export default function TasksSidebar({ tasks, userId, userSkills, selfLocation, 
                           border: '1px solid rgba(230,126,34,0.6)',
                           color: '#e67e22',
                           borderRadius: '10px',
-                          cursor: 'pointer',
                           fontFamily: 'var(--pip-font)',
                           textTransform: 'uppercase',
-                          minHeight: '28px',
-                          touchAction: 'manipulation',
                         }}
                       >
                         Review
-                      </button>
+                      </span>
                     )}
                   </div>
 

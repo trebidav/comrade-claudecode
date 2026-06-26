@@ -30,7 +30,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["id", "username", "email", "latitude", "longitude", "skills", "is_superuser", "is_staff", "coins", "xp", "total_coins_earned", "total_xp_earned", "task_streak", "level", "level_progress"]
+        fields = ["id", "username", "email", "latitude", "longitude", "skills", "is_superuser", "is_staff", "coins", "xp", "total_coins_earned", "total_xp_earned", "task_streak", "level", "level_progress", "profile_picture"]
 
 
 class PendingReviewSerializer(serializers.ModelSerializer):
@@ -145,8 +145,13 @@ class TutorialTaskFlatSerializer(serializers.ModelSerializer):
     skill_execute_names = serializers.SerializerMethodField()
     in_progress = serializers.SerializerMethodField()
 
+    reward_skill_name = serializers.SerializerMethodField()
+
     def get_id(self, obj): return TUTORIAL_ID_OFFSET + obj.pk
     def get_is_tutorial(self, obj): return True
+
+    def get_reward_skill_name(self, obj):
+        return obj.reward_skill.name if obj.reward_skill else None
 
     def get_skill_execute_names(self, obj):
         return [s.name for s in obj.skill_execute.all()]
@@ -161,4 +166,4 @@ class TutorialTaskFlatSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TutorialTask
-        fields = ['id', 'is_tutorial', 'name', 'description', 'lat', 'lon', 'skill_execute_names', 'in_progress']
+        fields = ['id', 'is_tutorial', 'name', 'description', 'lat', 'lon', 'skill_execute_names', 'in_progress', 'reward_skill_name']

@@ -66,7 +66,9 @@ export default function Login({ onLogin }: Props) {
       padding: '24px 20px',
       paddingTop: 'calc(env(safe-area-inset-top, 0px) + 40px)',
       paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 40px)',
-    }}>
+    }}
+    className="login-crt"
+    >
       {/* Logo / header */}
       <div className="login-logo-enter" style={{ textAlign: 'center', marginBottom: '40px' }}>
         <div style={{
@@ -201,7 +203,7 @@ export default function Login({ onLogin }: Props) {
 
         <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--glass-border)', textAlign: 'center' }}>
           <div style={{ fontSize: '0.6rem', color: 'var(--pip-green-dark)', letterSpacing: '0.08em' }}>
-            Dev: david / david · worker / worker
+            comrade-0.1.0-beta
           </div>
         </div>
       </div>

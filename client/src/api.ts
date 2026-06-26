@@ -24,6 +24,7 @@ export interface Task {
   is_tutorial: boolean
   // Tutorial-only
   in_progress?: boolean
+  reward_skill_name?: string | null
   // Regular task fields
   state?: number
   criticality?: number
@@ -42,6 +43,9 @@ export interface Task {
   datetime_start?: string | null
   datetime_finish?: string | null
   datetime_paused?: string | null
+  respawn?: boolean
+  respawn_time?: string | null
+  respawn_offset?: number | null
   datetime_respawn?: string | null
   time_spent_minutes?: number | null
   pending_review?: {
@@ -99,6 +103,7 @@ export interface User {
   task_streak: number
   level: number
   level_progress: { level: number; current_xp: number; required_xp: number }
+  profile_picture: string
 }
 
 export interface Achievement {
